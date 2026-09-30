@@ -1,0 +1,135 @@
+// 供应商合同自动化工作台 —— 数据模型
+// 说明：为兼容 SQLite 本地开发与 Postgres 生产环境，
+// 状态字段统一用 String，JSON 结构统一用 String 序列化存储。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  role      String // supplier / biz / legal / admin
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Vendor {
+  id         String   @id @default(cuid())
+  legalName  String // 签约主体（公司法定名称）
+  country    String // 注册地
+  address    String // 注册地址
+  product    String // 产品/服务
+  signerName String // 签字人姓名
+  title      String // 签字人职务
+  email      String // 签字人邮箱（签署邮箱）
+  status     String   @default("Draft") // Draft / Active / Blocked
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  contracts Contract[]
+}
+
+model Contract {
+  id               String   @id @default(cuid())
+  vendorId         String
+  type             String   @default("distribution") // 分销协议
+  status           String   @default("Draft") // 状态机见 lib/contracts/state-machine.ts
+  currentVersionId String? // 指向当前版本（普通字段，避免自引用环状级联）
+  draftTermsJson   String? // Draft 状态下表单"保存草稿"的可变条款；提交审批时固化为版本
+  archivedAt       DateTime? // 归档时间
+  archivedBy       String? // 归档操作人
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  vendor            Vendor @relation(fields: [vendorId], references: [id])
+  versions          ContractVersion[]
+  signatureRequests SignatureRequest[]
+}
+
+model ContractVersion {
+  id              String   @id @default(cuid())
+  contractId      String
+  version         Int // 从 1 开始递增
+  termsJson       String // 商业条款 JSON 字符串（不可变）
+  vendorSnapshot  String // 供应商信息快照 JSON 字符串
+  pdfUrl          String?
+  hash            String? // 条款内容哈希（完整性）
+  templateVersion Int      @default(1)
+  lockedAt        DateTime? // 提交审批时锁定
+  createdBy       String?
+  createdAt       DateTime @default(now())
+
+  contract          Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  approvals         Approval[]
+  signatureRequests SignatureRequest[]
+
+  @@unique([contractId, version])
+}
+
+model Approval {
+  id         String    @id @default(cuid())
+  versionId  String
+  role       String // biz / legal
+  approverId String? // 审批人邮箱
+  status     String    @default("Pending") // Pending / Approved / Rejected
+  comment    String?
+  approvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  version ContractVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, role])
+}
+
+model SignatureRequest {
+  id                 String    @id @default(cuid())
+  contractId         String
+  versionId          String
+  provider           String    @default("mock")
+  providerEnvelopeId String?
+  status             String    @default("Draft") // Draft/Sent/PartiallySigned/Completed/Failed/Cancelled
+  signersJson        String // 签署人列表 JSON
+  sentAt             DateTime?
+  completedAt        DateTime?
+  signedPdfUrl       String?
+  certificateUrl     String?
+  lastEventId        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  contract Contract         @relation(fields: [contractId], references: [id])
+  version   ContractVersion @relation(fields: [versionId], references: [id])
+}
+
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String
+  eventId     String
+  envelopeId  String
+  eventType   String
+  payload     String
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
+}
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  actor         String // 操作者标识（邮箱 / "AI" / "system" / "webhook"）
+  actorType     String // user / ai / system / webhook
+  source        String // user / ai / system / webhook
+  action        String // 动作语义标识
+  entity        String
+  entityId      String
+  before        String?
+  after         String?
+  correlationId String?
+  timestamp     DateTime @default(now())
+}
