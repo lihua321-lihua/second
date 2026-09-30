@@ -1,14 +1,18 @@
 // 供应商合同自动化工作台 —— 数据模型
-// 说明：为兼容 SQLite 本地开发与 Postgres 生产环境，
+// 说明：本地开发与生产统一使用 Postgres（Supabase），
 // 状态字段统一用 String，JSON 结构统一用 String 序列化存储。
 
 generator client {
   provider = "prisma-client-js"
+  // Netlify 函数运行在 AWS Lambda：Amazon Linux（glibc）→ rhel-openssl-3.0.x；
+  // linux-musl-openssl-3.0.x 兜底部分 Alpine 系运行时；native 供本地开发。
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 model User {
